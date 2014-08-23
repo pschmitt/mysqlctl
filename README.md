@@ -1,6 +1,7 @@
 # mysqlctl
 
-Basic set of tools to interact with a MySQL database
+Basic set of tools to interact with a MySQL database.
+
 The `mysqlctl` script provides a few easy shortcuts like user/database listing, creation and deletion
 
 
