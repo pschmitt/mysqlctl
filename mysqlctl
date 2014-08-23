@@ -92,15 +92,23 @@ dump() {
     mysqldump -h $MYSQL_HOST -u${MYSQL_USER} -p${MYSQL_PASS} "$@"
 }
 
-db_recap() {
+recap_db_create() {
     echo "Successfully created database '$1'"
 }
 
-user_recap() {
+recap_db_delete() {
+    echo "Successfully removed database '$1'"
+}
+
+recap_user_create() {
     echo "Successfully created user '$1' with password '$2'"
 }
 
-grant_recap() {
+recap_user_delete() {
+    echo "Successfully removed user '$1'"
+}
+
+recap_grant() {
     echo "Successfully granted access to database '$1' to user '$2'"
 }
 
@@ -175,10 +183,14 @@ case "$1" in
                 [[ -z "$mysql_pass" ]] && {
                     mysql_pass=$(generate_password $PASSWORD_LENGTH)
                 }
-                create_user "$mysql_user" "$mysql_pass"
+                create_user "$mysql_user" "$mysql_pass" && {
+                    recap_user_create "$mysql_user"
+                }
                 [[ "$CREATE_DB" -eq 1 ]] && {
                     create_db "$mysql_user" && {
-                        grant "$mysql_user" "$mysql_user" "$mysql_pass"
+                        grant "$mysql_user" "$mysql_user" "$mysql_pass" && {
+                            recap_db_create "$mysql_db"
+                        }
                     }
                 }
                 ;;
@@ -186,7 +198,9 @@ case "$1" in
                 # TODO
                 mysql_db="$3"
                 [[ -n "$mysql_db" ]] || usage 2
-                create_db "$mysql_db"
+                create_db "$mysql_db" && {
+                    recap_db_create "$mysql_db"
+                }
                 ;;
             *)
                 usage 2
@@ -196,16 +210,24 @@ case "$1" in
     d|delete|rm|remove)
         case "$2" in
             u|user)
-                mysql_user=$3
+                mysql_user="$3"
+                mysql_db="$mysql_user"
                 [[ -n "$mysql_user" ]] || usage 2
-                delete_user "$mysql_user"
+                delete_user "$mysql_user" && {
+                    recap_user_delete "$mysql_user"
+                }
+                user_delete_success=$?
                 # Delete database having the same name as user
-                [[ "$RECURSIVE" -eq 1 ]] && delete_db "$mysql_user"
+                [[ "$RECURSIVE" -eq 1 ]] && {
+                    delete_db "$mysql_db" && {
+                        recap_db_delete "$mysql_db"
+                    }
+                }
                 ;;
             d|db|database)
                 mysql_db=$3
                 [[ -n "$mysql_db" ]] || usage 2
-                delete_db "$mysql_db"
+                delete_db "$mysql_db" && recap_db_delete "$mysql_db"
                 ;;
         esac
         ;;
@@ -218,7 +240,9 @@ case "$1" in
         mysql_db="$2"
         mysql_user="$3"
         mysql_pass="$4"
-        grant "$mysql_user" "$mysql_user" "$mysql_pass"
+        grant "$mysql_user" "$mysql_user" "$mysql_pass" && {
+            recap_grant "$mysql_user" "$mysql_user" "$mysql_pass"
+        }
         ;;
     l|ls|list)
         case "$2" in
