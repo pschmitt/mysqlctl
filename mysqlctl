@@ -188,8 +188,9 @@ case "$1" in
                 }
                 [[ "$CREATE_DB" -eq 1 ]] && {
                     create_db "$mysql_user" && {
+                        recap_db_create "$mysql_db"
                         grant "$mysql_user" "$mysql_user" "$mysql_pass" && {
-                            recap_db_create "$mysql_db"
+                            recap_grant "$mysql_db"
                         }
                     }
                 }
