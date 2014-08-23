@@ -1,0 +1,259 @@
+#!/usr/bin/env sh
+
+# default options
+MYSQL_HOST=localhost
+MYSQL_USER=root
+MYSQL_PASS=
+PASSWORD_LENGTH=20
+
+usage() {
+    echo "Usage: $(basename $0) OPTIONS CMD"
+    echo
+    echo "OPTIONS: -H, -u, -p, -n, -d, -v, -m, -r"
+    echo "    -H: MySQL host"
+    echo "    -u: MySQL username"
+    echo "    -p: MySQL password"
+    echo "    -n: Dry run. Don't execute any SQL command."
+    echo "    -d: Debug mode"
+    echo "    -v: Verbose output"
+    echo "    -m: Create database with same name as user"
+    echo "    -r: Delete both user and database"
+    echo
+    echo "COMMANDS: create|delete|dump|grant|ls"
+    echo "    create [db|user] ITEM"
+    echo "        Create user or database"
+    echo "        -m will create a new database with the same name as the new user"
+    echo "    delete [db|user] ITEM"
+    echo "        Delete user or database"
+    echo "        -r will remove both user and database"
+    echo "    dump DATABASE [TABLE]"
+    echo "        Dump whole database or specific table(s)"
+    echo "    grant DATABASE USER PASSWORD"
+    echo "        Grant access to database to user"
+    echo "    ls [db|user|grant]"
+    echo "        List databases, users, permissions"
+    [[ -n $1 ]] && exit $1
+}
+
+generate_password() {
+     tr -dc '[:alnum:]' < /dev/urandom | fold -w "$1" | head -1
+}
+
+create_user() {
+    [[ "$VERBOSE" -eq 1 ]] && echo "Create user $1"
+    local query="CREATE USER '$1'@'$MYSQL_HOST' IDENTIFIED BY '$2';"
+    $MYSQL_CMD "$query"
+}
+
+create_db() {
+    [[ "$VERBOSE" -eq 1 ]] && echo "Create database $1"
+    local query="CREATE DATABASE IF NOT EXISTS $1;"
+    $MYSQL_CMD "$query"
+}
+
+grant() {
+    [[ "$VERBOSE" -eq 1 ]] && echo "Grant all on $1 to $2"
+    local query="\
+        GRANT ALL ON ${1}.* TO '$2'@'$MYSQL_HOST' IDENTIFIED BY '$3'; \
+        FLUSH PRIVILEGES;"
+    $MYSQL_CMD "$query"
+}
+
+delete_user() {
+    # MySQL < 5.0.2
+    # local query="DROP USER '$1'@'$MYSQL_HOST';"
+    # MySQL > 5.0.2
+    # local query="DROP USER '$1';"
+    local query="DROP USER '$1'@'$MYSQL_HOST';"
+    $MYSQL_CMD "$query"
+}
+
+delete_db() {
+    local query="DROP DATABASE $1;"
+    $MYSQL_CMD "$query"
+}
+
+ls_db() {
+    local query="show databases;"
+    $MYSQL_CMD "$query"
+}
+
+ls_users() {
+    local query="SELECT User FROM mysql.user;"
+    $MYSQL_CMD "$query"
+}
+
+ls_grants() {
+    local query="SHOW GRANTS FOR '$1'@'$MYSQL_HOST';"
+    $MYSQL_CMD "$query"
+}
+
+dump() {
+    mysqldump -h $MYSQL_HOST -u${MYSQL_USER} -p${MYSQL_PASS} "$@"
+}
+
+db_recap() {
+    echo "Successfully created database '$1'"
+}
+
+user_recap() {
+    echo "Successfully created user '$1' with password '$2'"
+}
+
+grant_recap() {
+    echo "Successfully granted access to database '$1' to user '$2'"
+}
+
+OPTS=`getopt -o dhH:l:mnp:ru:v --long debug,help,host:,password-length:,dryrun,create-db,password:,recursive,username:,verbose -n '$(basename $0)' -- "$@"`
+eval set -- "$OPTS"
+
+while :
+do
+    case "$1" in
+        -d|--debug)
+            DEBUG=1
+            shift
+            ;;
+        -v|--verbose)
+            VERBOSE=1
+            shift
+            ;;
+        -n|--dryrun)
+            DRYRUN=1
+            shift
+            ;;
+        -h|--help)
+            usage 0
+            ;;
+        -H|--host)
+            MYSQL_HOST="$2"
+            shift 2
+            ;;
+        -u|--username)
+            MYSQL_USER="$2"
+            shift 2
+            ;;
+        -p|--password)
+            MYSQL_PASS="$2"
+            shift 2
+            ;;
+        -r|--recursive)
+            RECURSIVE=1
+            shift
+            ;;
+        -m|--create-db)
+            CREATE_DB=1
+            shift
+            ;;
+        -p|--password-length)
+            PASSWORD_LENGTH="$2"
+            shift 2
+            ;;
+        --)
+            shift
+            break
+            ;;
+        *)
+            echo "Internal error!"
+            exit 1
+            ;;
+    esac
+done
+
+MYSQL_CMD="mysql -h $MYSQL_HOST -u${MYSQL_USER} -p${MYSQL_PASS} -e"
+
+case "$1" in
+    h|help)
+        usage 0
+        ;;
+    c|create|n|new)
+        case "$2" in
+            u|user)
+                mysql_user="$3"
+                mysql_pass="$4"
+                [[ -n "$mysql_user" ]] || usage 2
+                [[ -z "$mysql_pass" ]] && {
+                    mysql_pass=$(generate_password $PASSWORD_LENGTH)
+                }
+                create_user "$mysql_user" "$mysql_pass"
+                [[ "$CREATE_DB" -eq 1 ]] && {
+                    create_db "$mysql_user" && {
+                        grant "$mysql_user" "$mysql_user" "$mysql_pass"
+                    }
+                }
+                ;;
+            d|db|database)
+                # TODO
+                mysql_db="$3"
+                [[ -n "$mysql_db" ]] || usage 2
+                create_db "$mysql_db"
+                ;;
+            *)
+                usage 2
+                ;;
+        esac
+        ;;
+    d|delete|rm|remove)
+        case "$2" in
+            u|user)
+                mysql_user=$3
+                [[ -n "$mysql_user" ]] || usage 2
+                delete_user "$mysql_user"
+                # Delete database having the same name as user
+                [[ "$RECURSIVE" -eq 1 ]] && delete_db "$mysql_user"
+                ;;
+            d|db|database)
+                mysql_db=$3
+                [[ -n "$mysql_db" ]] || usage 2
+                delete_db "$mysql_db"
+                ;;
+        esac
+        ;;
+    dump)
+        [[ -n "$2" ]] || usage 2
+        shift
+        dump "$@"
+        ;;
+    g|grant)
+        mysql_db="$2"
+        mysql_user="$3"
+        mysql_pass="$4"
+        grant "$mysql_user" "$mysql_user" "$mysql_pass"
+        ;;
+    l|ls|list)
+        case "$2" in
+            u|user|users)
+                ls_users
+                ;;
+            d|db|database)
+                ls_db
+                ;;
+            g|grants)
+                ls_grants "$3"
+                ;;
+            '')
+                ls_db
+                ls_users
+                ;;
+            *)
+                usage 2
+                ;;
+        esac
+        ;;
+    *)
+        usage 2
+        ;;
+esac
+
+[[ "$DEBUG" -eq 1 ]] && {
+    echo "OPTS: $OPTS"
+    echo "Verbose: $VERBOSE"
+    echo "Dryrun: $DRYRUN"
+    echo "MySQL host: $MYSQL_HOST"
+    echo "MySQL user: $MYSQL_USER"
+    echo "MySQL pass: $MYSQL_PASS"
+    echo "MySQL cmd: $MYSQL_CMD"
+    echo "Create DB: $CREATE_DB"
+    echo "Remaining arguments:"
+    for arg do echo '--> '"\`$arg'" ; done
+}
