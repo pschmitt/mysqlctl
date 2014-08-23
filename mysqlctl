@@ -184,7 +184,7 @@ case "$1" in
                     mysql_pass=$(generate_password $PASSWORD_LENGTH)
                 }
                 create_user "$mysql_user" "$mysql_pass" && {
-                    recap_user_create "$mysql_user"
+                    recap_user_create "$mysql_user" "$mysql_pass"
                 }
                 [[ "$CREATE_DB" -eq 1 ]] && {
                     create_db "$mysql_user" && {
