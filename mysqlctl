@@ -1,5 +1,7 @@
 #!/usr/bin/env sh
 
+# TODO Grant acces to a specific table
+
 # default options
 MYSQL_HOST=localhost
 MYSQL_USER=root
@@ -21,12 +23,16 @@ usage() {
     echo "    -b: Set backup directory"
     echo "    -z: Compress backup"
     echo
-    echo "COMMANDS: create|delete|backup|dump|grant|ls"
-    echo "    create [db|user] ITEM"
+    echo "COMMANDS: create|delete|backup|dump|truncate|grant|ls"
+    echo "    create [db|user|table] ITEM"
     echo "        Create user or database"
+    echo "        NOTE: To create a table you have to specify the database:"
+    echo "            \$ $(basename $0) create table DATABASE TABLE # or: DATABASE.TABLE"
     echo "        -m: Create a new database with the same name as the new user"
-    echo "    delete [db|user] ITEM"
-    echo "        Delete user or database"
+    echo "    delete [db|user|table] ITEM"
+    echo "        Delete user, database or table"
+    echo "        NOTE: To delete a table you have to specify the database:"
+    echo "            \$ $(basename $0) delete table DATABASE TABLE # or: DATABASE.TABLE"
     echo "        -r: Remove both user and database"
     echo "    backup DATABASE [TABLE]"
     echo "        Backup database or specific table"
@@ -40,7 +46,17 @@ usage() {
     echo "        Grant access to database to user"
     echo "    ls [db|user|grant]"
     echo "        List databases, users, permissions"
-    [[ -n $1 ]] && exit $1
+    [[ -n "$1" ]] && exit $1
+}
+
+# Split a string like "database.table" in two
+split_db_table() {
+    tr '.' ' ' <<< "$1"
+}
+
+# Return the amount of dots contained in a string
+count_dots() {
+    grep -o '\.' <<< "$1" | wc -l
 }
 
 generate_password() {
@@ -301,6 +317,11 @@ case "$1" in
             t|table)
                 mysql_db="$3"
                 mysql_table="$4"
+                [[ -z "$mysql_table" ]] && {
+                    [[ "$(count_dots $mysql_db)" -gt 0 ]] && {
+                        read mysql_db mysql_table <<< "$(split_db_table $mysql_db)"
+                    }
+                }
                 [[ -n "$mysql_db" ]] || usage 2
                 [[ -n "$mysql_table" ]] || usage 2
                 create_table "$mysql_db" "$mysql_table" && {
@@ -337,7 +358,11 @@ case "$1" in
                 mysql_db="$3"
                 mysql_table="$4"
                 [[ -n "$mysql_db" ]] || usage 2
-                [[ -n "$mysql_table" ]] || usage 2
+                [[ -z "$mysql_table" ]] && {
+                    [[ "$(count_dots $mysql_db)" -gt 0 ]] && {
+                        read mysql_db mysql_table <<< "$(split_db_table $mysql_db)"
+                    } || usage 2
+                }
                 delete_table "$mysql_db" "$mysql_table" && {
                     recap_table_delete "$mysql_db" "$mysql_table"
                 }
@@ -368,7 +393,11 @@ case "$1" in
         mysql_db="$2"
         mysql_table="$3"
         [[ -n "$mysql_db" ]] || usage 2
-        [[ -n "$mysql_table" ]] || usage 2
+        [[ -z "$mysql_table" ]] && {
+            [[ "$(count_dots $mysql_db)" -gt 0 ]] && {
+                read mysql_db mysql_table <<< "$(split_db_table $mysql_db)"
+            } || usage 2
+        }
         truncate "$mysql_db" "$mysql_table" && {
             recap_truncate "$mysql_db" "$mysql_table"
         }
