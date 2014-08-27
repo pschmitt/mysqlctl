@@ -2,8 +2,8 @@
 
 Basic set of tools to interact with a MySQL database.
 
-The `mysqlctl` script provides a few easy shortcuts like user/database listing,
-creation and deletion.
+The `mysqlctl` script provides a few easy shortcuts like user/database/table
+listing, creation and deletion.
 
 
 ## Usage
@@ -46,6 +46,9 @@ COMMANDS: create|delete|backup|dump|truncate|grant|ls
             $ mysqlctl truncate DATABASE TABLE # or: DATABASE.TABLE
     grant DATABASE USER PASSWORD
         Grant access to database to user
-    ls [db|user|grant]
-        List databases, users, permissions
+    ls [db|user|grant|tables]
+        List databases, users, permissions, tables
+    sql [DATABASE] SQL_QUERY
+        Execute arbitrary SQL command on DATABASE
+        NOTE: When database is omitted none will be selected
 ```
