@@ -44,26 +44,45 @@ usage() {
 }
 
 generate_password() {
-     tr -dc '[:alnum:]' < /dev/urandom | fold -w "$1" | head -1
+    tr -dc '[:alnum:]' < /dev/urandom | fold -w "$1" | head -1
 }
 
 create_user() {
-    [[ "$VERBOSE" -eq 1 ]] && echo "Create user $1"
     local query="CREATE USER '$1'@'$MYSQL_HOST' IDENTIFIED BY '$2';"
+    [[ "$VERBOSE" -eq 1 ]] && echo "Create user $1"
     $MYSQL_CMD "$query"
 }
 
 create_db() {
+    local query="CREATE DATABASE $1;" # IF NOT EXISTS?
     [[ "$VERBOSE" -eq 1 ]] && echo "Create database $1"
-    local query="CREATE DATABASE IF NOT EXISTS $1;"
+    $MYSQL_CMD "$query"
+}
+
+create_table() {
+    local mysql_db="$1"
+    local mysql_table="$2"
+    local pk_field="id"
+    local query="\
+        USE $mysql_db;\
+        CREATE TABLE $mysql_table (\
+            $pk_field INT UNSIGNED NOT NULL AUTO_INCREMENT, \
+            primary key ($pk_field)\
+        );"
+    # IF NOT EXISTS?
+    [[ "$VERBOSE" -eq 1 ]] && echo "Create table '$mysql_db'.'$mysql_table'"
     $MYSQL_CMD "$query"
 }
 
 grant() {
-    [[ "$VERBOSE" -eq 1 ]] && echo "Grant all on $1 to $2"
+    local mysql_db="$1"
+    local mysql_user="$2"
+    local mysql_pass="$3"
     local query="\
-        GRANT ALL ON ${1}.* TO '$2'@'$MYSQL_HOST' IDENTIFIED BY '$3'; \
+        GRANT ALL ON ${mysql_db}.* TO '$mysql_user'@'$MYSQL_HOST' \
+        IDENTIFIED BY '$mysql_pass'; \
         FLUSH PRIVILEGES;"
+    [[ "$VERBOSE" -eq 1 ]] && echo "Grant all on $mysql_db to $mysql_user"
     $MYSQL_CMD "$query"
 }
 
@@ -72,27 +91,43 @@ delete_user() {
     # local query="DROP USER '$1'@'$MYSQL_HOST';"
     # MySQL > 5.0.2
     # local query="DROP USER '$1';"
-    local query="DROP USER '$1'@'$MYSQL_HOST';"
+    local mysql_user="$1"
+    local query="DROP USER '$mysql_user'@'$MYSQL_HOST';"
+    [[ "$VERBOSE" -eq 1 ]] && echo "Delete user $mysql_user"
     $MYSQL_CMD "$query"
 }
 
 delete_db() {
-    local query="DROP DATABASE $1;"
+    local mysql_db="$1"
+    local query="DROP DATABASE $mysql_db;" # IF EXISTS?
+    [[ "$VERBOSE" -eq 1 ]] && echo "Delete database $mysql_db"
+    $MYSQL_CMD "$query"
+}
+
+delete_table() {
+    local mysql_db="$1"
+    local mysql_table="$2"
+    local query="DROP TABLE $mysql_db.$mysql_table;" # IF EXISTS?
+    [[ "$VERBOSE" -eq 1 ]] && echo "Delete table '$mysql_db'.'$mysql_table'"
+    # TODO Update GRANT rights since they remain after deletion
     $MYSQL_CMD "$query"
 }
 
 ls_db() {
     local query="show databases;"
+    [[ "$VERBOSE" -eq 1 ]] && echo "List databases"
     $MYSQL_CMD "$query"
 }
 
 ls_users() {
     local query="SELECT User FROM mysql.user;"
+    [[ "$VERBOSE" -eq 1 ]] && echo "List users"
     $MYSQL_CMD "$query"
 }
 
 ls_grants() {
     local query="SHOW GRANTS FOR '$1'@'$MYSQL_HOST';"
+    [[ "$VERBOSE" -eq 1 ]] && echo "List grants"
     $MYSQL_CMD "$query"
 }
 
@@ -106,28 +141,42 @@ backup() {
     local backup_file="$3"
     local save_file="> $backup_file"
     [[ "$COMPRESSION" -eq 1 ]] && save_file="| gzip -c $save_file"
-    eval "$MYSQL_DUMP_CMD --lock-tables=false $mysql_db $mysql_table $save_file"
+    local backup_cmd="$MYSQL_DUMP_CMD --lock-tables=false $mysql_db $mysql_table $save_file"
+    [[ "$VERBOSE" ]] && echo "Back up $mysql_db.$mysql_table to $backup_file"
+    [[ "$DEBUG" -eq 1 ]] && echo "$backup_cmd"
+    eval "$backup_cmd"
 }
 
 truncate() {
-    local query="TRUNCATE TABLE $1.$2"
+    local mysql_db="$1"
+    local mysql_table="$2"
+    local query="TRUNCATE TABLE $mysql_db.$mysql_table;"
+    [[ "$VERBOSE" -eq 1 ]] && echo "Truncating $mysql_db.$mysql_table"
     $MYSQL_CMD "$query"
-}
-
-recap_db_create() {
-    echo "Successfully created database '$1'"
 }
 
 recap_db_delete() {
     echo "Successfully removed database '$1'"
 }
 
-recap_user_create() {
-    echo "Successfully created user '$1' with password '$2'"
+recap_table_delete() {
+    echo "Successfully removed table '$1'.'$2'"
 }
 
 recap_user_delete() {
     echo "Successfully removed user '$1'"
+}
+
+recap_db_create() {
+    echo "Successfully created database '$1'"
+}
+
+recap_table_create() {
+    echo "Successfully created table '$1'.'$2'"
+}
+
+recap_user_create() {
+    echo "Successfully created user '$1' with password '$2'"
 }
 
 recap_grant() {
@@ -231,14 +280,14 @@ case "$1" in
                 }
                 create_user "$mysql_user" "$mysql_pass" && {
                     recap_user_create "$mysql_user" "$mysql_pass"
-                }
-                [[ "$CREATE_DB" -eq 1 ]] && {
-                    create_db "$mysql_user" && {
-                        recap_db_create "$mysql_db"
-                        grant "$mysql_user" "$mysql_user" "$mysql_pass" && {
-                            recap_grant "$mysql_db"
+                    [[ "$CREATE_DB" -eq 1 ]] && {
+                        create_db "$mysql_user" && {
+                            recap_db_create "$mysql_db"
+                            grant "$mysql_user" "$mysql_user" "$mysql_pass" && {
+                                recap_grant "$mysql_db" "$mysql_user"
+                            }
                         }
-                    }
+                    } || true # ensure we return true
                 }
                 ;;
             d|db|database)
@@ -247,6 +296,15 @@ case "$1" in
                 [[ -n "$mysql_db" ]] || usage 2
                 create_db "$mysql_db" && {
                     recap_db_create "$mysql_db"
+                }
+                ;;
+            t|table)
+                mysql_db="$3"
+                mysql_table="$4"
+                [[ -n "$mysql_db" ]] || usage 2
+                [[ -n "$mysql_table" ]] || usage 2
+                create_table "$mysql_db" "$mysql_table" && {
+                    recap_table_create "$mysql_db" "$mysql_table"
                 }
                 ;;
             *)
@@ -262,19 +320,27 @@ case "$1" in
                 [[ -n "$mysql_user" ]] || usage 2
                 delete_user "$mysql_user" && {
                     recap_user_delete "$mysql_user"
-                }
-                user_delete_success=$?
-                # Delete database having the same name as user
-                [[ "$RECURSIVE" -eq 1 ]] && {
-                    delete_db "$mysql_db" && {
-                        recap_db_delete "$mysql_db"
-                    }
+                    # Delete database having the same name as user
+                    [[ "$RECURSIVE" -eq 1 ]] && {
+                        delete_db "$mysql_db" && {
+                            recap_db_delete "$mysql_db"
+                        }
+                    } || true # ensure we return true
                 }
                 ;;
             d|db|database)
-                mysql_db=$3
+                mysql_db="$3"
                 [[ -n "$mysql_db" ]] || usage 2
                 delete_db "$mysql_db" && recap_db_delete "$mysql_db"
+                ;;
+            t|table)
+                mysql_db="$3"
+                mysql_table="$4"
+                [[ -n "$mysql_db" ]] || usage 2
+                [[ -n "$mysql_table" ]] || usage 2
+                delete_table "$mysql_db" "$mysql_table" && {
+                    recap_table_delete "$mysql_db" "$mysql_table"
+                }
                 ;;
         esac
         ;;
@@ -301,6 +367,7 @@ case "$1" in
     t|truncate)
         mysql_db="$2"
         mysql_table="$3"
+        [[ -n "$mysql_db" ]] || usage 2
         [[ -n "$mysql_table" ]] || usage 2
         truncate "$mysql_db" "$mysql_table" && {
             recap_truncate "$mysql_db" "$mysql_table"
@@ -310,8 +377,11 @@ case "$1" in
         mysql_db="$2"
         mysql_user="$3"
         mysql_pass="$4"
-        grant "$mysql_user" "$mysql_user" "$mysql_pass" && {
-            recap_grant "$mysql_user" "$mysql_user" "$mysql_pass"
+        [[ -n "$mysql_db" ]] || usage 2
+        [[ -n "$mysql_user" ]] || usage 2
+        [[ -n "$mysql_pass" ]] || usage 2
+        grant "$mysql_db" "$mysql_user" "$mysql_pass" && {
+            recap_grant "$mysql_db" "$mysql_user"
         }
         ;;
     l|ls|list)
@@ -323,6 +393,8 @@ case "$1" in
                 ls_db
                 ;;
             g|grants)
+                mysql_db="$3"
+                [[ -n "$mysql_db" ]] || usage 2
                 ls_grants "$3"
                 ;;
             '')
