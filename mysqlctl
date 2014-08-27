@@ -1,4 +1,6 @@
 #!/usr/bin/env sh
+# Author: Philipp Schmitt <philipp@schmitt.co>
+# Version: 0.6
 
 # TODO Grant acces to a specific table
 
@@ -46,8 +48,11 @@ usage() {
     echo "            \$ $(basename $0) truncate DATABASE TABLE # or: DATABASE.TABLE"
     echo "    grant DATABASE USER PASSWORD"
     echo "        Grant access to database to user"
-    echo "    ls [db|user|grant]"
-    echo "        List databases, users, permissions"
+    echo "    ls [db|user|grant|tables]"
+    echo "        List databases, users, permissions, tables"
+    echo "    sql [DATABASE] SQL_QUERY"
+    echo "        Execute arbitrary SQL command on DATABASE"
+    echo "        NOTE: When database is omitted none will be selected"
     [[ -n "$1" ]] && exit $1
 }
 
@@ -63,6 +68,17 @@ count_dots() {
 
 generate_password() {
     tr -dc '[:alnum:]' < /dev/urandom | fold -w "$1" | head -1
+}
+
+sql_exec() {
+    local mysql_db="$1"
+    local query="$2"
+    [[ "$VERBOSE" -eq 1 ]] && {
+        local msg="Executing SQL command $query"
+        [[ -n "$mysql_db" ]] && msg="$msg on $mysql_db"
+        echo $msg
+    }
+    $MYSQL_CMD "$query" "$mysql_db"
 }
 
 create_user() {
@@ -134,6 +150,13 @@ delete_table() {
 ls_db() {
     local query="show databases;"
     [[ "$VERBOSE" -eq 1 ]] && echo "List databases"
+    $MYSQL_CMD "$query"
+}
+
+ls_tables() {
+    local mysql_db="$1"
+    local query="SHOW TABLES FROM $mysql_db;"
+    [[ "$VERBOSE" -eq 1 ]] && echo "List table on $mysql_db"
     $MYSQL_CMD "$query"
 }
 
@@ -426,7 +449,12 @@ case "$1" in
             g|grants)
                 mysql_db="$3"
                 [[ -n "$mysql_db" ]] || usage 2
-                ls_grants "$3"
+                ls_grants "$mysql_db"
+                ;;
+            t|tables)
+                mysql_db="$3"
+                [[ -n "$mysql_db" ]] || usage 2
+                ls_tables "$mysql_db"
                 ;;
             '')
                 ls_db
@@ -436,6 +464,19 @@ case "$1" in
                 usage 2
                 ;;
         esac
+        ;;
+    s|sql)
+        case $# in
+            2)
+                mysql_db=
+                mysql_query="$2"
+                ;;
+            3)
+                mysql_db="$2"
+                mysql_query="$3"
+                ;;
+        esac
+        sql_exec "$mysql_db" "$mysql_query"
         ;;
     *)
         usage 2
