@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 # Author: Philipp Schmitt <philipp@schmitt.co>
-# Version: 0.6
+# Version: 0.2.1
 
 # TODO Grant acces to a specific table
 
@@ -53,7 +53,7 @@ usage() {
     echo "    sql [DATABASE] SQL_QUERY"
     echo "        Execute arbitrary SQL command on DATABASE"
     echo "        NOTE: When database is omitted none will be selected"
-    [[ -n "$1" ]] && exit $1
+    [[ -n "$1" ]] && exit "$1"
 }
 
 # Split a string like "database.table" in two
@@ -76,7 +76,7 @@ sql_exec() {
     [[ "$VERBOSE" -eq 1 ]] && {
         local msg="Executing SQL command $query"
         [[ -n "$mysql_db" ]] && msg="$msg on $mysql_db"
-        echo $msg
+        echo "$msg"
     }
     $MYSQL_CMD "$query" "$mysql_db"
 }
@@ -234,7 +234,7 @@ recap_truncate() {
     echo "Successfully truncated table '$1'.'$2'"
 }
 
-OPTS=`getopt -o b:dhH:l:mnp:ru:vz --long backup-dir:,debug,help,host:,password-length:,dryrun,create-db,password:,recursive,username:,verbose,compress -n '$(basename $0)' -- "$@"`
+OPTS=$(getopt -o b:dhH:l:mnp:ru:vz --long backup-dir:,debug,help,host:,password-length:,dryrun,create-db,password:,recursive,username:,verbose,compress -n '$(basename $0)' -- "$@")
 eval set -- "$OPTS"
 
 while :
@@ -317,18 +317,21 @@ case "$1" in
                 mysql_pass="$4"
                 [[ -n "$mysql_user" ]] || usage 2
                 [[ -z "$mysql_pass" ]] && {
-                    mysql_pass=$(generate_password $PASSWORD_LENGTH)
+                    mysql_pass="$(generate_password $PASSWORD_LENGTH)"
                 }
                 create_user "$mysql_user" "$mysql_pass" && {
                     recap_user_create "$mysql_user" "$mysql_pass"
-                    [[ "$CREATE_DB" -eq 1 ]] && {
+                    if [[ "$CREATE_DB" -eq 1 ]]
+                    then
                         create_db "$mysql_user" && {
                             recap_db_create "$mysql_db"
                             grant "$mysql_user" "$mysql_user" "$mysql_pass" && {
                                 recap_grant "$mysql_db" "$mysql_user"
                             }
                         }
-                    } || true # ensure we return true
+                    else
+                        true # ensure we return true
+                    fi
                 }
                 ;;
             d|db|database)
@@ -362,16 +365,19 @@ case "$1" in
         case "$2" in
             u|user)
                 mysql_user="$3"
-                mysql_db="$mysql_user"
                 [[ -n "$mysql_user" ]] || usage 2
                 delete_user "$mysql_user" && {
                     recap_user_delete "$mysql_user"
                     # Delete database having the same name as user
-                    [[ "$RECURSIVE" -eq 1 ]] && {
+                    if [[ "$RECURSIVE" -eq 1 ]]
+                    then
+                        mysql_db="$mysql_user"
                         delete_db "$mysql_db" && {
                             recap_db_delete "$mysql_db"
                         }
-                    } || true # ensure we return true
+                    else
+                        true # ensure we return true
+                    fi
                 }
                 ;;
             d|db|database)
@@ -384,9 +390,12 @@ case "$1" in
                 mysql_table="$4"
                 [[ -n "$mysql_db" ]] || usage 2
                 [[ -z "$mysql_table" ]] && {
-                    [[ "$(count_dots $mysql_db)" -gt 0 ]] && {
+                    if [[ "$(count_dots $mysql_db)" -gt 0 ]]
+                    then
                         read mysql_db mysql_table <<< "$(split_db_table $mysql_db)"
-                    } || usage 2
+                    else
+                        usage 2
+                    fi
                 }
                 delete_table "$mysql_db" "$mysql_table" && {
                     recap_table_delete "$mysql_db" "$mysql_table"
