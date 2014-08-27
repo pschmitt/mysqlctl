@@ -23,12 +23,16 @@ OPTIONS: -H, -u, -p, -n, -d, -v, -m, -r, -b, -z
     -b: Set backup directory
     -z: Compress backup
 
-COMMANDS: create|delete|backup|dump|grant|ls
-    create [db|user] ITEM
+COMMANDS: create|delete|backup|dump|truncate|grant|ls
+    create [db|user|table] ITEM
         Create user or database
+        NOTE: To create a table you have to specify the database:
+            $ mysqlctl create table DATABASE TABLE # or: DATABASE.TABLE
         -m: Create a new database with the same name as the new user
-    delete [db|user] ITEM
-        Delete user or database
+    delete [db|user|table] ITEM
+        Delete user, database or table
+        NOTE: To delete a table you have to specify the database:
+            $ mysqlctl delete table DATABASE TABLE # or: DATABASE.TABLE
         -r: Remove both user and database
     backup DATABASE [TABLE]
         Backup database or specific table
@@ -36,6 +40,8 @@ COMMANDS: create|delete|backup|dump|grant|ls
         -b DIR: Set backup directory (default is PWD)
     dump DATABASE [TABLE]
         Dump whole database or specific table(s)
+    truncate DATABASE TABLE
+        Truncate a table
     grant DATABASE USER PASSWORD
         Grant access to database to user
     ls [db|user|grant]
