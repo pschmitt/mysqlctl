@@ -34,6 +34,8 @@ usage() {
     echo "        -b DIR: Set backup directory (default is PWD)"
     echo "    dump DATABASE [TABLE]"
     echo "        Dump whole database or specific table(s)"
+    echo "    truncate DATABASE TABLE"
+    echo "        Truncate a table"
     echo "    grant DATABASE USER PASSWORD"
     echo "        Grant access to database to user"
     echo "    ls [db|user|grant]"
@@ -99,18 +101,17 @@ dump() {
 }
 
 backup() {
-    [[ -z "$BACKUP_DIR" ]] && BACKUP_DIR=$(pwd)
-    # Remove trailing '/'
-    BACKUP_DIR=$(sed 's|/\+$||' <<< "$BACKUP_DIR")
     local mysql_db="$1"
     local mysql_table="$2"
-    local backup_file="${BACKUP_DIR}/${mysql_db}"
-    [[ -n "$mysql_table" ]] && backup_file="${backup_file}.${mysql_table}"
-    backup_file="${backup_file}_$(date '+%d%m%Y_%H%M%S').log"
-    [[ "$COMPRESSION" -eq 1 ]] && backup_file="${backup_file}.gz"
+    local backup_file="$3"
     local save_file="> $backup_file"
-    [[ "$COMPRESSION" -eq 1 ]] && save_file="| gzip -c > $backup_file"
+    [[ "$COMPRESSION" -eq 1 ]] && save_file="| gzip -c $save_file"
     eval "$MYSQL_DUMP_CMD --lock-tables=false $mysql_db $mysql_table $save_file"
+}
+
+truncate() {
+    local query="TRUNCATE TABLE $1.$2"
+    $MYSQL_CMD "$query"
 }
 
 recap_db_create() {
@@ -131,6 +132,16 @@ recap_user_delete() {
 
 recap_grant() {
     echo "Successfully granted access to database '$1' to user '$2'"
+}
+
+recap_backup() {
+    local backup_item="'$1'"
+    [[ -n "$2" ]] && backup_item="${backup_item}.'${2}'"
+    echo "Successfully backed up $backup_item to '$3'"
+}
+
+recap_truncate() {
+    echo "Successfully truncated table '$1'.'$2'"
 }
 
 OPTS=`getopt -o b:dhH:l:mnp:ru:vz --long backup-dir:,debug,help,host:,password-length:,dryrun,create-db,password:,recursive,username:,verbose,compress -n '$(basename $0)' -- "$@"`
@@ -271,12 +282,29 @@ case "$1" in
         mysql_db="$2"
         mysql_table="$3"
         [[ -n "$mysql_db" ]] || usage 2
-        backup "$mysql_db" "$mysql_table"
+        [[ -z "$BACKUP_DIR" ]] && BACKUP_DIR=$(pwd)
+        # Remove trailing '/'
+        BACKUP_DIR=$(sed 's|/\+$||' <<< "$BACKUP_DIR")
+        backup_file="${BACKUP_DIR}/${mysql_db}"
+        [[ -n "$mysql_table" ]] && backup_file="${backup_file}.${mysql_table}"
+        backup_file="${backup_file}_$(date '+%d%m%Y_%H%M%S').log"
+        [[ "$COMPRESSION" -eq 1 ]] && backup_file="${backup_file}.gz"
+        backup "$mysql_db" "$mysql_table" "$backup_file" && {
+            recap_backup "$mysql_db" "$mysql_table" "$backup_file"
+        }
         ;;
     dump)
         [[ -n "$2" ]] || usage 2
         shift
         dump "$@"
+        ;;
+    t|truncate)
+        mysql_db="$2"
+        mysql_table="$3"
+        [[ -n "$mysql_table" ]] || usage 2
+        truncate "$mysql_db" "$mysql_table" && {
+            recap_truncate "$mysql_db" "$mysql_table"
+        }
         ;;
     g|grant)
         mysql_db="$2"
@@ -322,8 +350,10 @@ RESULT=$?
     echo "MySQL pass: $MYSQL_PASS"
     echo "MySQL cmd: $MYSQL_CMD"
     echo "Create DB: $CREATE_DB"
+    echo "Backup dir: $BACKUP_DIR"
+    echo "Compression: $COMPRESSION"
     echo "Remaining arguments:"
     for arg do echo '--> '"\`$arg'" ; done
 }
 
-[[ "$RESULT" -eq 0 ]]
+exit $RESULT

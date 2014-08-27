@@ -8,7 +8,7 @@ creation and deletion.
 
 ## Usage
 
-``` bash
+```
 Usage: mysqlctl OPTIONS CMD
 
 OPTIONS: -H, -u, -p, -n, -d, -v, -m, -r, -b, -z
