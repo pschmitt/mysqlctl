@@ -42,6 +42,8 @@ usage() {
     echo "        Dump whole database or specific table(s)"
     echo "    truncate DATABASE TABLE"
     echo "        Truncate a table"
+    echo "        NOTE: To truncate a table you have to specify the database:"
+    echo "            \$ $(basename $0) truncate DATABASE TABLE # or: DATABASE.TABLE"
     echo "    grant DATABASE USER PASSWORD"
     echo "        Grant access to database to user"
     echo "    ls [db|user|grant]"

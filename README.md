@@ -42,6 +42,8 @@ COMMANDS: create|delete|backup|dump|truncate|grant|ls
         Dump whole database or specific table(s)
     truncate DATABASE TABLE
         Truncate a table
+        NOTE: To truncate a table you have to specify the database:
+            $ mysqlctl truncate DATABASE TABLE # or: DATABASE.TABLE
     grant DATABASE USER PASSWORD
         Grant access to database to user
     ls [db|user|grant]
