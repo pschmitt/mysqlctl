@@ -9,7 +9,7 @@ PASSWORD_LENGTH=20
 usage() {
     echo "Usage: $(basename $0) OPTIONS CMD"
     echo
-    echo "OPTIONS: -H, -u, -p, -n, -d, -v, -m, -r"
+    echo "OPTIONS: -H, -u, -p, -n, -d, -v, -m, -r, -b, -z"
     echo "    -H: MySQL host"
     echo "    -u: MySQL username"
     echo "    -p: MySQL password"
@@ -18,14 +18,20 @@ usage() {
     echo "    -v: Verbose output"
     echo "    -m: Create database with same name as user"
     echo "    -r: Delete both user and database"
+    echo "    -b: Set backup directory"
+    echo "    -z: Compress backup"
     echo
-    echo "COMMANDS: create|delete|dump|grant|ls"
+    echo "COMMANDS: create|delete|backup|dump|grant|ls"
     echo "    create [db|user] ITEM"
     echo "        Create user or database"
-    echo "        -m will create a new database with the same name as the new user"
+    echo "        -m: Create a new database with the same name as the new user"
     echo "    delete [db|user] ITEM"
     echo "        Delete user or database"
-    echo "        -r will remove both user and database"
+    echo "        -r: Remove both user and database"
+    echo "    backup DATABASE [TABLE]"
+    echo "        Backup database or specific table"
+    echo "        -z: Compress backup (gzip)"
+    echo "        -b DIR: Set backup directory (default is PWD)"
     echo "    dump DATABASE [TABLE]"
     echo "        Dump whole database or specific table(s)"
     echo "    grant DATABASE USER PASSWORD"
@@ -89,7 +95,22 @@ ls_grants() {
 }
 
 dump() {
-    mysqldump -h $MYSQL_HOST -u${MYSQL_USER} -p${MYSQL_PASS} "$@"
+    $MYSQL_DUMP_CMD "$@"
+}
+
+backup() {
+    [[ -z "$BACKUP_DIR" ]] && BACKUP_DIR=$(pwd)
+    # Remove trailing '/'
+    BACKUP_DIR=$(sed 's|/\+$||' <<< "$BACKUP_DIR")
+    local mysql_db="$1"
+    local mysql_table="$2"
+    local backup_file="${BACKUP_DIR}/${mysql_db}"
+    [[ -n "$mysql_table" ]] && backup_file="${backup_file}.${mysql_table}"
+    backup_file="${backup_file}_$(date '+%d%m%Y_%H%M%S').log"
+    [[ "$COMPRESSION" -eq 1 ]] && backup_file="${backup_file}.gz"
+    local save_file="> $backup_file"
+    [[ "$COMPRESSION" -eq 1 ]] && save_file="| gzip -c > $backup_file"
+    eval "$MYSQL_DUMP_CMD --lock-tables=false $mysql_db $mysql_table $save_file"
 }
 
 recap_db_create() {
@@ -112,7 +133,7 @@ recap_grant() {
     echo "Successfully granted access to database '$1' to user '$2'"
 }
 
-OPTS=`getopt -o dhH:l:mnp:ru:v --long debug,help,host:,password-length:,dryrun,create-db,password:,recursive,username:,verbose -n '$(basename $0)' -- "$@"`
+OPTS=`getopt -o b:dhH:l:mnp:ru:vz --long backup-dir:,debug,help,host:,password-length:,dryrun,create-db,password:,recursive,username:,verbose,compress -n '$(basename $0)' -- "$@"`
 eval set -- "$OPTS"
 
 while :
@@ -157,6 +178,14 @@ do
             PASSWORD_LENGTH="$2"
             shift 2
             ;;
+        -b|--backup-dir)
+            BACKUP_DIR="$2"
+            shift 2
+            ;;
+        -z|--compress)
+            COMPRESSION=1
+            shift
+            ;;
         --)
             shift
             break
@@ -169,6 +198,12 @@ do
 done
 
 MYSQL_CMD="mysql -h $MYSQL_HOST -u${MYSQL_USER} -p${MYSQL_PASS} -e"
+MYSQL_DUMP_CMD="mysqldump -h $MYSQL_HOST -u${MYSQL_USER} -p${MYSQL_PASS}"
+
+[[ "$DRYRUN" -eq 1 ]] && {
+    MYSQL_CMD="echo $MYSQL_CMD"
+    MYSQL_DUMP_CMD="echo $MYSQL_DUMP_CMD"
+}
 
 case "$1" in
     h|help)
@@ -232,6 +267,12 @@ case "$1" in
                 ;;
         esac
         ;;
+    b|backup)
+        mysql_db="$2"
+        mysql_table="$3"
+        [[ -n "$mysql_db" ]] || usage 2
+        backup "$mysql_db" "$mysql_table"
+        ;;
     dump)
         [[ -n "$2" ]] || usage 2
         shift
@@ -270,6 +311,8 @@ case "$1" in
         ;;
 esac
 
+RESULT=$?
+
 [[ "$DEBUG" -eq 1 ]] && {
     echo "OPTS: $OPTS"
     echo "Verbose: $VERBOSE"
@@ -282,3 +325,5 @@ esac
     echo "Remaining arguments:"
     for arg do echo '--> '"\`$arg'" ; done
 }
+
+[[ "$RESULT" -eq 0 ]]
