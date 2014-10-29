@@ -181,6 +181,7 @@ backup() {
     local mysql_table="$2"
     local backup_file="$3"
     local save_file="> $backup_file"
+    [[ "$mysql_db" == 'all' ]] && mysql_db='--all-databases'
     [[ "$COMPRESSION" -eq 1 ]] && save_file="| gzip -c $save_file"
     local backup_cmd="$MYSQL_DUMP_CMD --lock-tables=false $mysql_db $mysql_table $save_file"
     [[ "$VERBOSE" ]] && echo "Back up $mysql_db.$mysql_table to $backup_file"
